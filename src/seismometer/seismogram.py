@@ -48,6 +48,7 @@ class Seismogram(object, metaclass=Singleton):
         self,
         config: ConfigProvider = None,
         dataloader: SeismogramLoader = None,
+        ie_criteria: Optional[dict] = None,  # New parameter
     ):
         """
         Constructor for Seismogram, which can only be instantiated once.
@@ -66,9 +67,9 @@ class Seismogram(object, metaclass=Singleton):
             raise ValueError("Seismogram has not been initialized; requires Config and dataloader on initial call.")
 
         self._initialize_attrs()
-
         self.config = config
         self.dataloader = dataloader
+        self.ie_criteria = ie_criteria  # Store I/E criteria
 
         self.dataframe: pd.DataFrame = None
         self.cohort_cols: list[str] = []
@@ -91,6 +92,26 @@ class Seismogram(object, metaclass=Singleton):
         # load data
         self.available_cohort_groups = dict()
         self.selected_cohort = (None, None)  # column, values
+
+    def _apply_inclusion_exclusion(self):
+        """
+        Applies the Inclusion/Exclusion criteria to filter data.
+        """
+        if not self.ie_criteria:
+            return
+
+        for column, conditions in self.ie_criteria.items():
+            if column in self.dataframe.columns:
+                include_values = conditions.get("include", None)
+                exclude_values = conditions.get("exclude", None)
+
+                if include_values is not None:
+                    self.dataframe = self.dataframe[self.dataframe[column].isin(include_values)]
+                if exclude_values is not None:
+                    self.dataframe = self.dataframe[~self.dataframe[column].isin(exclude_values)]
+
+        logger.info(f"Applied Inclusion/Exclusion criteria. Remaining samples: {len(self.dataframe)}")
+
 
     def load_data(
         self, *, predictions: Optional[pd.DataFrame] = None, events: Optional[pd.DataFrame] = None, reset: bool = False
@@ -119,6 +140,10 @@ class Seismogram(object, metaclass=Singleton):
         self._load_metadata()
 
         self.dataframe = self.dataloader.load_data(predictions, events)
+
+        # Apply Inclusion/Exclusion Criteria
+        if self.ie_criteria:
+            self._apply_inclusion_exclusion()
 
         self.create_cohorts()
         self._set_df_counts()
